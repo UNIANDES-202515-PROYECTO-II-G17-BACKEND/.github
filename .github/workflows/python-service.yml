@@ -3,20 +3,27 @@ name: python-service
 on:
   workflow_call:
     inputs:
-      service_name:   { type: string, required: true }
-      python_version: { type: string, required: false, default: '3.13' }
+      service_name:
+        type: string
+        required: true
+      python_version:
+        type: string
+        required: false
+        default: '3.13'
     secrets:
-      WIF_PROVIDER:        { required: true }
-      WIF_SERVICE_ACCOUNT: { required: true }
+      WIF_PROVIDER:
+        required: true
+      WIF_SERVICE_ACCOUNT:
+        required: true
 
 permissions:
   contents: read
   id-token: write
 
 env:
-  REGION:         ${{ vars.REGION }}
-  PROJECT_ID:     ${{ vars.PROJECT_ID }}
-  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}
+  REGION:         ${{ vars.REGION }}          # p.ej. us-central1
+  PROJECT_ID:     ${{ vars.PROJECT_ID }}      # p.ej. tu-proyecto
+  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}    # p.ej. cloud-run-exec@...iam.gserviceaccount.com
   PYTHON_VERSION: ${{ inputs.python_version }}
 
 concurrency:
@@ -24,18 +31,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # -------------------- CI: lint + tests con cobertura --------------------
   ci:
     name: Lint & Tests (>=80% cobertura)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Instalar Poetry
+      - name: Install Poetry
         run: pip install -U pip poetry
 
       - name: Cache Poetry
@@ -46,7 +54,7 @@ jobs:
             ~/.cache/pypoetry
           key: ${{ runner.os }}-poetry-${{ hashFiles('pyproject.toml') }}-${{ hashFiles('poetry.lock') }}
 
-      - name: Instalar dependencias (incluye dev)
+      - name: Install deps (incluye dev)
         run: poetry install
 
       - name: Lint (ruff)
@@ -56,14 +64,13 @@ jobs:
 
       - name: Tests con cobertura (falla si <80%)
         run: |
-          # Usa pytest-cov; agrega en tu pyproject: [tool.poetry.group.dev.dependencies] pytest-cov
           poetry run pytest \
             --cov=src \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml \
             --cov-fail-under=80
 
-      - name: Publicar coverage.xml (artefacto)
+      - name: Publicar coverage.xml como artefacto
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -71,9 +78,8 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
-  # -------------------- CD: build & deploy (solo push a master) --------------------
   cd:
-    name: Build & Deploy a Cloud Run (master)
+    name: Build & Deploy a Cloud Run (solo push a master)
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
@@ -81,18 +87,39 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: google-github-actions/auth@v2
+      - name: Auth GCP (WIF)
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Login a Artifact Registry
+      - name: Docker auth -> Artifact Registry
         run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
       - name: Build & Push imagen
         env:
-          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/s
+          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/services/${{ inputs.service_name }}
+        run: |
+          TAG=$(git rev-parse --short HEAD)
+          IMAGE="${IMAGE_REPO}:${TAG}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy a Cloud Run
+        run: |
+          gcloud run deploy "${{ inputs.service_name }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --region  "${{ env.REGION }}" \
+            --image   "${IMAGE}" \
+            --service-account "${{ env.CLOUD_RUN_SA }}" \
+            --allow-unauthenticated \
+            --port 8080 \
+            --min-instances=0 --max-instances=3 \
+            --set-env-vars=PYTHONUNBUFFERED=1,PYTHONDONTWRITEBYTECODE=1
