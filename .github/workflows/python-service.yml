@@ -33,6 +33,11 @@ concurrency:
 
 jobs:
   ci:
+    if: >
+      github.event_name == 'pull_request' &&
+      (github.event.pull_request.base.ref == 'develop' ||
+       github.event.pull_request.base.ref == 'main')
+
     name: Lint & Tests (coverage gate)
     runs-on: ubuntu-latest
     steps:
@@ -60,11 +65,14 @@ jobs:
 
       # ---------- Tests ----------
       - name: Run tests (generate coverage.xml)
+        env:
+          PYTHONPATH: src
         run: |
           poetry run pytest \
             --cov=src \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml
+
 
       # ---------- Coverage gate ----------
       - name: Enforce coverage >= 80%
@@ -89,7 +97,7 @@ jobs:
   cd:
     name: Build & Deploy (push to master only)
     needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
