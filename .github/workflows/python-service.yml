@@ -60,11 +60,14 @@ jobs:
 
       # ---------- Tests ----------
       - name: Run tests (generate coverage.xml)
+        env:
+          PYTHONPATH: src
         run: |
           poetry run pytest \
             --cov=src \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml
+
 
       # ---------- Coverage gate ----------
       - name: Enforce coverage >= 80%
