@@ -10,43 +10,46 @@ on:
         type: string
         required: false
         default: '3.13'
+
     secrets:
       WIF_PROVIDER:
-        required: true
+        required: false
       WIF_SERVICE_ACCOUNT:
-        required: true
+        required: false
 
 permissions:
   contents: read
   id-token: write
 
 env:
-  REGION:         ${{ vars.REGION }}          # p.ej. us-central1
-  PROJECT_ID:     ${{ vars.PROJECT_ID }}      # p.ej. tu-proyecto
-  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}    # p.ej. cloud-run-exec@...iam.gserviceaccount.com
+  REGION:         ${{ vars.REGION }}
+  PROJECT_ID:     ${{ vars.PROJECT_ID }}
+  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}
   PYTHON_VERSION: ${{ inputs.python_version }}
+  COV_MIN:        '80'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.service_name }}
   cancel-in-progress: true
 
 jobs:
+  # ---------------- CI: Lint + Tests + Coverage ----------------
   ci:
-    name: Lint & Tests (>=80% cobertura)
+    name: Lint & Tests (>=${{ env.COV_MIN }}% cobertura)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Poetry
+      - name: 📦 Install Poetry
         run: pip install -U pip poetry
 
-      - name: Cache Poetry
+      - name: ♻️ Cache Poetry
         uses: actions/cache@v4
         with:
           path: |
@@ -54,23 +57,36 @@ jobs:
             ~/.cache/pypoetry
           key: ${{ runner.os }}-poetry-${{ hashFiles('pyproject.toml') }}-${{ hashFiles('poetry.lock') }}
 
-      - name: Install deps (incluye dev)
+      - name: 📥 Install deps (incluye dev)
         run: poetry install
 
-      - name: Lint (ruff)
+      - name: 🔎 Lint (ruff)
         run: |
           pip install ruff
           ruff check .
 
-      - name: Tests con cobertura (falla si <80%)
+      - name: 🧪 Run tests + generar coverage.xml
         run: |
           poetry run pytest \
             --cov=src \
             --cov-report=term-missing:skip-covered \
-            --cov-report=xml \
-            --cov-fail-under=80
+            --cov-report=xml
 
-      - name: Publicar coverage.xml como artefacto
+      - name: ✅ Verificar cobertura >= ${{ env.COV_MIN }}%
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml'); root = tree.getroot()
+          # Cobertura global (line-rate)
+          rate = float(root.attrib.get('line-rate', 0.0)) * 100.0
+          print(f"Coverage: {rate:.2f}%")
+          threshold = float("${{ env.COV_MIN }}")
+          if rate + 1e-9 < threshold:
+              print(f"FAIL: coverage {rate:.2f}% < {threshold}%")
+              sys.exit(1)
+          PY
+
+      - name: 📤 Publicar coverage.xml
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -78,8 +94,9 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+  # --------------- CD: Build & Deploy (solo push a master) ---------------
   cd:
-    name: Build & Deploy a Cloud Run (solo push a master)
+    name: Build & Deploy a Cloud Run (solo master)
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
@@ -87,32 +104,36 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Checkout
+      - name: 🧾 Checkout
         uses: actions/checkout@v4
 
-      - name: Auth GCP (WIF)
+      - name: 🔐 Auth GCP (WIF)
+        # Solo intentamos autenticar si los secrets están presentes
+        if: ${{ secrets.WIF_PROVIDER != '' && secrets.WIF_SERVICE_ACCOUNT != '' }}
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
-      - name: Setup gcloud
+      - name: ☁️ Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Docker auth -> Artifact Registry
+      - name: 🔑 Docker login -> Artifact Registry
         run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
-      - name: Build & Push imagen
+      - name: 🏗️ Build image
         env:
           IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/services/${{ inputs.service_name }}
         run: |
           TAG=$(git rev-parse --short HEAD)
           IMAGE="${IMAGE_REPO}:${TAG}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          docker build -t "$IMAGE" .
 
-      - name: Deploy a Cloud Run
+      - name: 📦 Push image
+        run: docker push "$IMAGE"
+
+      - name: 🚀 Deploy a Cloud Run
         run: |
           gcloud run deploy "${{ inputs.service_name }}" \
             --project "${{ env.PROJECT_ID }}" \
