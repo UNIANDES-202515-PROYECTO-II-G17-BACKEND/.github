@@ -12,33 +12,30 @@ on:
         default: '3.13'
     secrets:
       WIF_PROVIDER:
-        required: true        # <- requeridos para evitar 'Unrecognized named-value: secrets'
+        required: true
       WIF_SERVICE_ACCOUNT:
         required: true
 
-permissions:
-  contents: read
-  id-token: write
-
 env:
-  REGION:         ${{ vars.REGION }}          # p.ej. us-central1
-  PROJECT_ID:     ${{ vars.PROJECT_ID }}      # p.ej. tu-proyecto
-  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}    # p.ej. cloud-run-exec@...iam.gserviceaccount.com
+  REGION:         ${{ vars.REGION }}
+  PROJECT_ID:     ${{ vars.PROJECT_ID }}
+  CLOUD_RUN_SA:   ${{ vars.CLOUD_RUN_SA }}
   PYTHON_VERSION: ${{ inputs.python_version }}
-  COV_MIN:        '80'                        # umbral cobertura
+  COV_MIN:        '80'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.service_name }}
   cancel-in-progress: true
 
 jobs:
+  # ---- CI: PR a main/develop y push a main/develop ----
   ci:
-    if: >
+    if: |
       (github.event_name == 'pull_request' &&
-      (github.event.pull_request.base.ref == 'develop' ||
-       github.event.pull_request.base.ref == 'main')) || 
-      (github.event_name == 'push' && (github.event.push.base.ref == 'main' || github.event.push.base.ref == 'develop'))
-
+       (github.event.pull_request.base.ref == 'main' ||
+        github.event.pull_request.base.ref == 'develop')) ||
+      (github.event_name == 'push' &&
+       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'))
     name: Lint & Tests & Coverage
     runs-on: ubuntu-latest
     steps:
