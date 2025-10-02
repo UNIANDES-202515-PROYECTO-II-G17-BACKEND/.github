@@ -34,9 +34,10 @@ concurrency:
 jobs:
   ci:
     if: >
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' &&
       (github.event.pull_request.base.ref == 'develop' ||
-       github.event.pull_request.base.ref == 'main')
+       github.event.pull_request.base.ref == 'main')) || 
+      (github.event_name == 'push' && (github.event.push.base.ref == 'main' || github.event.push.base.ref == 'develop'))
 
     name: Lint & Tests & Coverage
     runs-on: ubuntu-latest
