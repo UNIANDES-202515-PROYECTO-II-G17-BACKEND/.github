@@ -118,14 +118,16 @@ jobs:
       - name: Docker login to Artifact Registry
         run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
 
+
       - name: Build image
         env:
-          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/services/${{ inputs.service_name }}
+          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/project-images/${{ inputs.service_name }}
         run: |
           TAG=$(git rev-parse --short HEAD)
           IMAGE="${IMAGE_REPO}:${TAG}"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           docker build -t "$IMAGE" .
+
 
       # ---------- Push ----------
       - name: Push image
