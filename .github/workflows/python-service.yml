@@ -38,7 +38,7 @@ jobs:
       (github.event.pull_request.base.ref == 'develop' ||
        github.event.pull_request.base.ref == 'main')
 
-    name: Lint & Tests (coverage gate)
+    name: Lint & Tests & Coverage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
