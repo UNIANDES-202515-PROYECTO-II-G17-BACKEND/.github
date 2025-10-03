@@ -133,6 +133,14 @@ jobs:
       - name: Push image
         run: docker push "$IMAGE"
 
+      # ------- Verify SA ----------
+
+      - name: Check runtime SA exists
+        run: |
+          gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --format="value(email)"
+
       # ---------- Deploy ----------
       - name: Deploy to Cloud Run
         run: |
@@ -141,7 +149,54 @@ jobs:
             --region  "${{ env.REGION }}" \
             --image   "${IMAGE}" \
             --service-account "${{ env.CLOUD_RUN_SA }}" \
-            --allow-unauthenticated \
-            --port 8080 \
-            --min-instances=0 --max-instances=3 \
-            --set-env-vars=PYTHONUNBUFFERED=1,PYTHONDONTWRITEBYTECODE=1
+            --allow-unauthenticated
+      
+
+#       POSIBLE CONFIGURACIÓN PARA DESPLIEGUES DEL TIPO BLUE GREEN
+
+#      # Detecta la tag activa y calcula la "nueva" (flip blue/green)
+#      - name: Pick next color (flip blue/green)
+#        id: pick
+#        run: |
+#          SVC="${{ inputs.service_name }}"
+#          REGION="${{ env.REGION }}"
+#          # tag actual con 100% (puede estar vacío si es la 1a vez)
+#          CUR=$(gcloud run services describe "$SVC" --region "$REGION" \
+#                --format='value(status.trafficStatuses[?percent=100].tag)' || true)
+#          if [ "$CUR" = "blue" ]; then NEXT="green"; else NEXT="blue"; fi
+#          echo "current=$CUR, next=$NEXT"
+#          echo "NEXT_TAG=$NEXT" >> $GITHUB_ENV
+#
+#      # 1) Deploy nueva revisión con TAG y sin enviar tráfico
+#      - name: Deploy new revision (no traffic)
+#        run: |
+#          gcloud run deploy "${{ inputs.service_name }}" \
+#            --project "${{ env.PROJECT_ID }}" \
+#            --region  "${{ env.REGION }}" \
+#            --image   "${IMAGE}" \
+#            --tag     "${NEXT_TAG}" \
+#            --no-traffic \
+#            --quiet
+#
+#      # 2) Obtener URL etiquetada y hacer smoke test
+#      - name: Smoke test on tagged URL
+#        run: |
+#          SVC="${{ inputs.service_name }}"
+#          REGION="${{ env.REGION }}"
+#          TAG="${NEXT_TAG}"
+#          URL=$(gcloud run services describe "$SVC" --region "$REGION" \
+#                --format="value(status.trafficStatuses[?tag='${TAG}'].url)")
+#          echo "Testing $URL/health ..."
+#          # Ajusta el endpoint de health si es distinto
+#          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/public/v1/health")
+#          echo "Status: $HTTP_STATUS"
+#          test "$HTTP_STATUS" = "200"
+#
+#      # 3) Promocionar atómicamente la tag a 100%
+#      - name: Promote traffic to new color
+#        run: |
+#          gcloud run services update-traffic "${{ inputs.service_name }}" \
+#            --project "${{ env.PROJECT_ID }}" \
+#            --region  "${{ env.REGION }}" \
+#            --to-tags "${NEXT_TAG}=100" \
+#            --quiet
