@@ -128,29 +128,34 @@ jobs:
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
           docker build -t "$IMAGE" .
 
+# ------------------------------- COMMENTED WHILE NEEDED ---------------------------------------------------
 
-      # ---------- Push ----------
-      - name: Push image
-        run: docker push "$IMAGE"
-
-      # ------- Verify SA ----------
-
-      - name: Check runtime SA exists
-        run: |
-          gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
-            --project "${{ env.PROJECT_ID }}" \
-            --format="value(email)"
-
-      # ---------- Deploy ----------
-      - name: Deploy to Cloud Run
-        run: |
-          gcloud run deploy "${{ inputs.service_name }}" \
-            --project "${{ env.PROJECT_ID }}" \
-            --region  "${{ env.REGION }}" \
-            --image   "${IMAGE}" \
-            --service-account "${{ env.CLOUD_RUN_SA }}" \
-            --allow-unauthenticated
+#      # ---------- Push ----------
+#      - name: Push image
+#        run: docker push "$IMAGE"
+#
+#      # ------- Verify SA ----------
+#
+#      - name: Check runtime SA exists
+#        run: |
+#          gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
+#            --project "${{ env.PROJECT_ID }}" \
+#            --format="value(email)"
+#
+#      # ---------- Deploy ----------
+#      - name: Deploy to Cloud Run
+#        run: |
+#          gcloud run deploy "${{ inputs.service_name }}" \
+#            --project "${{ env.PROJECT_ID }}" \
+#            --region  "${{ env.REGION }}" \
+#            --image   "${IMAGE}" \
+#            --service-account "${{ env.CLOUD_RUN_SA }}" \
+#            --allow-unauthenticated
       
+
+# ---------------------------------------------  NICE TO HAVE -------------------------------------------
+
+
 
 #       POSIBLE CONFIGURACIÓN PARA DESPLIEGUES DEL TIPO BLUE GREEN
 
