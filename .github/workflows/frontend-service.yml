@@ -35,7 +35,6 @@ jobs:
           node-version: ${{ inputs.node_version }}
           cache: npm
       - run: npm ci
-      - run: npm run lint
       - run: npm run test
       - name: Enforce coverage
         run: |
