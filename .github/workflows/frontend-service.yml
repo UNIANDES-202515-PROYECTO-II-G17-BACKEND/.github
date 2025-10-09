@@ -42,17 +42,22 @@ jobs:
           FILE=$(find . -type f -name "coverage-final.json" | head -n 1)
           if [ -z "$FILE" ]; then
             echo "coverage-final.json no encontrado"
+            echo "Posibles rutas:"
             find . -type f -path "*/coverage/*" || true
             exit 1
           fi
+      
           echo "Archivo encontrado en: $FILE"
           COVER=$(node -pe "const f=require('$FILE'); Math.round((f.total?.lines?.pct)||0)")
           echo "Coverage: ${COVER}%"
-          if [ "${COVER:-0}" -lt "${{ env.COV_MIN }}" ]; then
-            echo "FAIL: coverage below threshold (${COVER}% < ${{ env.COV_MIN }}%)"
+      
+          # 🔥 Usar un if en lugar de corchetes sueltos (para evitar fallar con set -e)
+          if [ "$COVER" -lt "${{ env.COV_MIN }}" ]; then
+            echo "❌ FAIL: coverage below threshold (${COVER}% < ${{ env.COV_MIN }}%)"
             exit 1
+          else
+            echo "✅ OK: coverage gate passed (${COVER}% ≥ ${{ env.COV_MIN }}%)"
           fi
-          echo "OK: coverage gate passed"
 
 
   cd:
