@@ -1,0 +1,72 @@
+name: frontend-service
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: true
+        type: string
+      node_version:
+        required: false
+        type: string
+        default: '24'
+    secrets:
+      WIF_PROVIDER:
+        required: true
+      WIF_SERVICE_ACCOUNT:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION:       ${{ vars.REGION }}
+  PROJECT_ID:   ${{ vars.PROJECT_ID }}
+  CLOUD_RUN_SA: ${{ vars.CLOUD_RUN_SA }}
+  COV_MIN:      '80'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - name: Enforce coverage
+        run: |
+          FILE=$(find . -name coverage-final.json | head -n 1)
+          [ -z "$FILE" ] && echo "coverage-final.json no encontrado" && exit 1
+          COVER=$(node -pe "const f=require('$FILE'); Math.round((f.total?.lines?.pct)||0)")
+          echo "Coverage: ${COVER}%"
+          [ "$COVER" -lt "${{ env.COV_MIN }}" ] && exit 1
+
+  cd:
+    if: github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+      - name: Build image
+        env:
+          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/project-images/${{ inputs.service_name }}
+        run: |
+          TAG=$(git rev-parse --short HEAD)
+          IMAGE="${IMAGE_REPO}:${TAG}"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          docker build -t "$IMAGE" .
+      # - run: docker push "$IMAGE"
+      # - run: gcloud run deploy "${{ inputs.service_name }}" --project "${{ env.PROJECT_ID }}" --region "${{ env.REGION }}" --image "$IMAGE" --service-account "${{ env.CLOUD_RUN_SA }}" --allow-unauthenticated
