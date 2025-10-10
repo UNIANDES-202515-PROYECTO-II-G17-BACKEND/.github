@@ -167,33 +167,41 @@ jobs:
           docker push "$IMAGE_LATEST"
 
       # ------- Verify SA ----------
+
       - name: Check runtime SA exists
         run: |
           gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
             --project "${{ env.PROJECT_ID }}" \
             --format="value(email)"
 
-      # ---------- Get digest ----------
-      - name: Get image digest
+      - name: Resolve image digest
         id: digest
         env:
           IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/project-images/${{ inputs.service_name }}
         run: |
-          DIGEST=$(gcloud artifacts docker images describe "${IMAGE_REPO}:${{ env.NEXT_VERSION }}" \
+          DIGEST=$(gcloud artifacts docker images describe "${IMAGE_REPO}:latest" \
             --format="get(image_summary.digest)")
-          echo "DIGEST=$DIGEST" >> $GITHUB_ENV
           echo "IMAGE_REF=${IMAGE_REPO}@${DIGEST}" >> $GITHUB_ENV
 
-      # ---------- Terraform (solo ese servicio) ----------
-      - name: Terraform Apply (update image only via digest)
-        env:
-          TF_VAR_service_images: |
-            {"${{ inputs.service_name }}":"${{ env.IMAGE_REF }}"}
+      - name: Deploy new revision (no traffic)
         run: |
-          terraform init -input=false
-          terraform apply -auto-approve \
-            -target="google_cloud_run_v2_service.svc[\"${{ inputs.service_name }}\"]"
-      
+          gcloud run deploy "${{ inputs.service_name }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --region  "${{ env.REGION }}" \
+            --image   "${IMAGE_REF}" \
+            --no-traffic
+
+      - name: Promote new revision to 100%
+        run: |
+          REV=$(gcloud run revisions list \
+            --project "${{ env.PROJECT_ID }}" \
+            --region  "${{ env.REGION }}" \
+            --service "${{ inputs.service_name }}" \
+            --format="value(METADATA.name)" --sort-by="~createTime" | head -n1)
+          gcloud run services update-traffic "${{ inputs.service_name }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --region  "${{ env.REGION }}" \
+            --to-revisions "${REV}=100"
 
  #---------------------------------------------  NICE TO HAVE -------------------------------------------
 
