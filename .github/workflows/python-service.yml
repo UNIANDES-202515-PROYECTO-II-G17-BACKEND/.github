@@ -167,22 +167,32 @@ jobs:
           docker push "$IMAGE_LATEST"
 
       # ------- Verify SA ----------
-
       - name: Check runtime SA exists
         run: |
           gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
             --project "${{ env.PROJECT_ID }}" \
             --format="value(email)"
 
-      # ---------- Deploy ----------
-      - name: Deploy to Cloud Run (versioned image)
+      # ---------- Get digest ----------
+      - name: Get image digest
+        id: digest
+        env:
+          IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/project-images/${{ inputs.service_name }}
         run: |
-          gcloud run deploy "${{ inputs.service_name }}" \
-            --project "${{ env.PROJECT_ID }}" \
-            --region  "${{ env.REGION }}" \
-            --image   "${IMAGE}" \
-            --service-account "${{ env.CLOUD_RUN_SA }}" \
-            --allow-unauthenticated
+          DIGEST=$(gcloud artifacts docker images describe "${IMAGE_REPO}:${{ env.NEXT_VERSION }}" \
+            --format="get(image_summary.digest)")
+          echo "DIGEST=$DIGEST" >> $GITHUB_ENV
+          echo "IMAGE_REF=${IMAGE_REPO}@${DIGEST}" >> $GITHUB_ENV
+
+      # ---------- Terraform (solo ese servicio) ----------
+      - name: Terraform Apply (update image only via digest)
+        env:
+          TF_VAR_service_images: |
+            {"${{ inputs.service_name }}":"${{ env.IMAGE_REF }}"}
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve \
+            -target="google_cloud_run_v2_service.svc[\"${{ inputs.service_name }}\"]"
       
 
  #---------------------------------------------  NICE TO HAVE -------------------------------------------
