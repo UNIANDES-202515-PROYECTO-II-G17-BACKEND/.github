@@ -16,7 +16,7 @@ on:
         required: true
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 env:
@@ -65,7 +65,7 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -75,13 +75,63 @@ jobs:
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v2
       - run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev" --quiet
+
+      - name: Determine next semantic version (patch bump)
+        id: semver
+        run: |
+          git fetch --tags --force
+          # Obtener el último tag válido semver (vX.Y.Z o X.Y.Z)
+          LAST_TAG=$(git tag --list --sort=-v:refname | grep -E '^(v)?[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          if [ -z "$LAST_TAG" ]; then
+            NEXT_VERSION="0.0.1"
+          else
+            # Quitar prefijo v si existe
+            BASE="${LAST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            PATCH=$((PATCH + 1))
+            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+          echo "NEXT_VERSION=$NEXT_VERSION" >> $GITHUB_ENV
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create & push git tag
+        if: steps.semver.outputs.next_version != ''
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ env.NEXT_VERSION }}" -m "Release v${{ env.NEXT_VERSION }}"
+          git push origin "v${{ env.NEXT_VERSION }}"
+
       - name: Build image
         env:
           IMAGE_REPO: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/project-images/${{ inputs.service_name }}
         run: |
-          TAG=$(git rev-parse --short HEAD)
-          IMAGE="${IMAGE_REPO}:${TAG}"
+          IMAGE_VERSION="${{ env.NEXT_VERSION }}"
+          IMAGE="${IMAGE_REPO}:${IMAGE_VERSION}"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+          echo "IMAGE_LATEST=${IMAGE_REPO}:latest" >> $GITHUB_ENV
           docker build -t "$IMAGE" .
-      # - run: docker push "$IMAGE"
-      # - run: gcloud run deploy "${{ inputs.service_name }}" --project "${{ env.PROJECT_ID }}" --region "${{ env.REGION }}" --image "$IMAGE" --service-account "${{ env.CLOUD_RUN_SA }}" --allow-unauthenticated
+
+      # -------- CHECK SA --------
+      - name: Check runtime SA exists
+        run: |
+          gcloud iam service-accounts describe "${{ env.CLOUD_RUN_SA }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --format="value(email)"    
+
+      # ---------- Push ----------
+      - name: Push image (version + latest)
+        run: |
+          docker tag  "$IMAGE" "$IMAGE_LATEST"
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
+
+      # ---------- Deploy ----------
+      - name: Deploy to Cloud Run (versioned image)
+        run: |
+          gcloud run deploy "${{ inputs.service_name }}" \
+            --project "${{ env.PROJECT_ID }}" \
+            --region  "${{ env.REGION }}" \
+            --image   "${IMAGE}" \
+            --service-account "${{ env.CLOUD_RUN_SA }}" \
+            --allow-unauthenticated
