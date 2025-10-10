@@ -188,20 +188,7 @@ jobs:
           gcloud run deploy "${{ inputs.service_name }}" \
             --project "${{ env.PROJECT_ID }}" \
             --region  "${{ env.REGION }}" \
-            --image   "${IMAGE_REF}" \
-            --no-traffic
-
-      - name: Promote new revision to 100%
-        run: |
-          REV=$(gcloud run revisions list \
-            --project "${{ env.PROJECT_ID }}" \
-            --region  "${{ env.REGION }}" \
-            --service "${{ inputs.service_name }}" \
-            --format="value(METADATA.name)" --sort-by="~createTime" | head -n1)
-          gcloud run services update-traffic "${{ inputs.service_name }}" \
-            --project "${{ env.PROJECT_ID }}" \
-            --region  "${{ env.REGION }}" \
-            --to-revisions "${REV}=100"
+            --image   "${IMAGE_REF}"
 
  #---------------------------------------------  NICE TO HAVE -------------------------------------------
 
