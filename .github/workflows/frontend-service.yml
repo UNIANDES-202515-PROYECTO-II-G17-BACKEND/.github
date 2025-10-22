@@ -23,7 +23,7 @@ env:
   REGION:       ${{ vars.REGION }}
   PROJECT_ID:   ${{ vars.PROJECT_ID }}
   CLOUD_RUN_SA: ${{ vars.CLOUD_RUN_SA }}
-  COV_MIN:      '70'
+  COV_MIN:      '80'
 
 jobs:
   ci:
